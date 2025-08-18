@@ -1,17 +1,13 @@
 <!DOCTYPE html>
 <html lang="fr">
 <head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>CamLive - Chat Vidéo</title>
   <style>
     body {
       font-family: Arial, sans-serif;
       text-align: center;
-      background: #f0f0f0;
-    }
-    h1 {
-      margin-top: 20px;
     }
     video {
       width: 45%;
@@ -27,10 +23,10 @@
   </style>
 </head>
 <body>
-  <h1>CamLive - Chat Vidéo</h1>
+  <h1>CamLive – Chat Vidéo</h1>
 
   <!-- Vidéos -->
-  <video id="localVideo" autoplay playsinline muted></video>
+  <video id="localVideo" autoplay playsinline></video>
   <video id="remoteVideo" autoplay playsinline></video>
 
   <!-- Bouton -->
@@ -39,6 +35,8 @@
   </div>
 
   <!-- Socket.io -->
-  <script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
-  </body>
-  </html>
+  <script src="https://cdn.socket.io/4.5.4/socket.io.min.js"></script>
+  <!-- Ton code JS -->
+  <script src="app.js"></script>
+</body>
+</html>
