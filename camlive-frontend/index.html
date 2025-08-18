@@ -1,42 +1,43 @@
 <!DOCTYPE html>
 <html lang="fr">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>CamLive - Chat Vidéo</title>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>CamLive++ – Chat vidéo</title>
   <style>
-    body {
-      font-family: Arial, sans-serif;
-      text-align: center;
-    }
-    video {
-      width: 45%;
-      margin: 10px;
-      border: 2px solid #333;
-    }
-    button {
-      padding: 10px 20px;
-      font-size: 16px;
-      margin: 20px;
-      cursor: pointer;
-    }
+    body { font-family: Arial, sans-serif; max-width: 980px; margin: 24px auto; text-align: center; }
+    h1 { margin-bottom: 12px; }
+    .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+    video { width: 100%; aspect-ratio: 16/9; background:#eee; border:2px solid #333; border-radius:6px; }
+    .controls { margin-top: 14px; display:flex; gap:10px; justify-content:center; flex-wrap:wrap; }
+    button { padding:10px 18px; font-size:16px; cursor:pointer; }
+    .hint { color:#666; font-size:14px; margin-top:6px; }
+    #status { margin-top:10px; }
   </style>
 </head>
 <body>
-  <h1>CamLive – Chat Vidéo</h1>
+  <h1>CamLive++ – Chat vidéo</h1>
 
-  <!-- Vidéos -->
-  <video id="localVideo" autoplay playsinline></video>
-  <video id="remoteVideo" autoplay playsinline></video>
-
-  <!-- Bouton -->
-  <div>
-    <button id="start">Démarrer</button>
+  <div class="grid">
+    <div>
+      <div class="hint">Toi</div>
+      <video id="localVideo" autoplay playsinline muted></video>
+    </div>
+    <div>
+      <div class="hint">Partenaire</div>
+      <video id="remoteVideo" autoplay playsinline></video>
+    </div>
   </div>
 
-  <!-- Socket.io -->
-  <script src="https://cdn.socket.io/4.5.4/socket.io.min.js"></script>
-  <!-- Ton code JS -->
+  <div class="controls">
+    <button id="start">Start / Find</button>
+    <button id="next" disabled>Next</button>
+    <button id="leave" disabled>Leave</button>
+  </div>
+
+  <div id="status" class="hint">Clique <b>Start</b> sur 2 appareils (ex. Mac + iPhone 4G).</div>
+
+  <script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
   <script src="app.js"></script>
 </body>
 </html>
