@@ -1,16 +1,32 @@
 <!DOCTYPE html>
-<html>
+<html lang="fr">
 <head>
-  <meta charset="UTF-8">
-  <title>CamLive</title>
-  <link rel="stylesheet" href="style.css">
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>CamLive - Chat Vidéo</title>
+  <style>
+    body { font-family: Arial, sans-serif; max-width: 900px; margin: 20px auto; }
+    h1 { text-align: center; }
+    .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+    video { width: 100%; aspect-ratio: 16/9; background:#eee; border:1px solid #aaa; }
+    #start { margin-top: 8px; }
+  </style>
 </head>
 <body>
   <h1>CamLive - Chat Vidéo</h1>
+
+  <div class="grid">
+    <!-- Ta propre caméra -->
+    <video id="localVideo" autoplay playsinline muted></video>
+    <!-- La vidéo de l'autre -->
+    <video id="remoteVideo" autoplay playsinline></video>
+  </div>
+
   <button id="start">Démarrer</button>
-  <video id="localVideo" autoplay playsinline muted></video>
-  <video id="remoteVideo" autoplay playsinline></video>
+
+  <!-- Socket.IO depuis CDN -->
   <script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
+  <!-- Ton script (chargé APRES le DOM pour éviter les soucis) -->
   <script src="app.js"></script>
 </body>
 </html>
