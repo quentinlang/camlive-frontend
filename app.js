@@ -1,4 +1,7 @@
-const socket = io("https://camlive-backend.onrender.com");
+const socket = io("https://camlive-backend.onrender.com", {
+  path: "/socket.io",
+  transports: ["websocket"]   // évite le mixed content et va direct en WS
+});
 const pc = new RTCPeerConnection();
 const localVideo = document.getElementById("localVideo");
 const remoteVideo = document.getElementById("remoteVideo");
