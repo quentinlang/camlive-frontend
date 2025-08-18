@@ -1,10 +1,10 @@
-// ----- Connexion au serveur de signalisation (Render) -----
+// ----- Socket.IO vers ton backend Render -----
 const socket = io("https://camlive-backend.onrender.com", {
   path: "/socket.io",
   transports: ["websocket"]
 });
 
-// ----- RTCPeerConnection avec serveurs STUN publics -----
+// ----- RTCPeerConnection + STUN -----
 const pc = new RTCPeerConnection({
   iceServers: [
     { urls: "stun:stun.l.google.com:19302" },
@@ -12,55 +12,54 @@ const pc = new RTCPeerConnection({
   ]
 });
 
-// Références aux éléments vidéo
 const localVideo  = document.getElementById("localVideo");
 const remoteVideo = document.getElementById("remoteVideo");
 
-// Debug utile dans la console
-pc.oniceconnectionstatechange = () => console.log("ICE state:", pc.iceConnectionState);
-pc.onconnectionstatechange   = () => console.log("PC state:", pc.connectionState);
+let localStream;
 
-// Quand on reçoit la vidéo distante
-pc.ontrack = (event) => {
-  remoteVideo.srcObject = event.streams[0];
-};
+// utilitaire: ouvre la cam/micro si pas déjà fait
+async function ensureLocalStream() {
+  if (!localStream) {
+    localStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
+    localStream.getTracks().forEach(t => pc.addTrack(t, localStream));
+    localVideo.srcObject = localStream;
+  }
+}
 
-// Bouton "Démarrer"
+// debug utile
+pc.oniceconnectionstatechange = () => console.log("ICE:", pc.iceConnectionState);
+pc.onconnectionstatechange   = () => console.log("PC:", pc.connectionState);
+
+// vidéo distante
+pc.ontrack = (e) => { remoteVideo.srcObject = e.streams[0]; };
+
+// bouton démarrer : on devient "caller" => on crée l'offer
 document.getElementById("start").onclick = async () => {
-  // Demander caméra + micro
-  const stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
-  stream.getTracks().forEach(track => pc.addTrack(track, stream));
-  localVideo.srcObject = stream;
-
-  // Créer et envoyer l'offre
+  await ensureLocalStream();
   const offer = await pc.createOffer();
   await pc.setLocalDescription(offer);
   socket.emit("offer", offer);
 };
 
-// Quand on reçoit une offre : répondre
+// on reçoit une offer : on devient "callee" => on ouvre la cam PUIS on répond
 socket.on("offer", async (offer) => {
+  await ensureLocalStream();                        // <-- IMPORTANT
   await pc.setRemoteDescription(new RTCSessionDescription(offer));
   const answer = await pc.createAnswer();
   await pc.setLocalDescription(answer);
   socket.emit("answer", answer);
 });
 
-// Quand on reçoit une réponse : la poser
+// on reçoit une answer
 socket.on("answer", async (answer) => {
   await pc.setRemoteDescription(new RTCSessionDescription(answer));
 });
 
-// Échanger les candidats ICE
-pc.onicecandidate = (event) => {
-  if (event.candidate) socket.emit("candidate", event.candidate);
-};
-
-socket.on("candidate", async (candidate) => {
-  try {
-    await pc.addIceCandidate(new RTCIceCandidate(candidate));
-  } catch (err) {
-    console.error("Error adding candidate", err);
-  }
+// échange ICE
+pc.onicecandidate = (e) => { if (e.candidate) socket.emit("candidate", e.candidate); };
+socket.on("candidate", async (c) => {
+  try { await pc.addIceCandidate(new RTCIceCandidate(c)); }
+  catch (err) { console.error("ICE add error", err); }
 });
- 
+
+
