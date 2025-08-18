@@ -1,10 +1,10 @@
-// ----- Socket.IO vers ton backend Render -----
+// ----- Connexion au serveur de signalisation (Render) -----
 const socket = io("https://camlive-backend.onrender.com", {
   path: "/socket.io",
   transports: ["websocket"]
 });
 
-// ----- RTCPeerConnection + STUN -----
+// ----- RTCPeerConnection + serveurs STUN publics -----
 const pc = new RTCPeerConnection({
   iceServers: [
     { urls: "stun:stun.l.google.com:19302" },
@@ -17,7 +17,7 @@ const remoteVideo = document.getElementById("remoteVideo");
 
 let localStream;
 
-// utilitaire: ouvre la cam/micro si pas déjà fait
+// Ouvre caméra/micro si pas déjà fait et lie à la vidéo locale
 async function ensureLocalStream() {
   if (!localStream) {
     localStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
@@ -26,40 +26,40 @@ async function ensureLocalStream() {
   }
 }
 
-// debug utile
+// Debug utile (voir F12 → Console)
 pc.oniceconnectionstatechange = () => console.log("ICE:", pc.iceConnectionState);
 pc.onconnectionstatechange   = () => console.log("PC:", pc.connectionState);
 
-// vidéo distante
-pc.ontrack = (e) => { remoteVideo.srcObject = e.streams[0]; };
+// Quand on reçoit la piste distante
+pc.ontrack = (e) => {
+  remoteVideo.srcObject = e.streams[0];
+};
 
-// bouton démarrer : on devient "caller" => on crée l'offer
+// Bouton "Démarrer" → on devient l'appelant : on envoie une offer
 document.getElementById("start").onclick = async () => {
-  await ensureLocalStream();
+  await ensureLocalStream();                 // important avant de créer l'offer
   const offer = await pc.createOffer();
   await pc.setLocalDescription(offer);
   socket.emit("offer", offer);
 };
 
-// on reçoit une offer : on devient "callee" => on ouvre la cam PUIS on répond
+// Quand on reçoit une offer → on devient le répondant : on ouvre la cam puis on répond
 socket.on("offer", async (offer) => {
-  await ensureLocalStream();                        // <-- IMPORTANT
+  await ensureLocalStream();                 // important pour renvoyer son flux
   await pc.setRemoteDescription(new RTCSessionDescription(offer));
   const answer = await pc.createAnswer();
   await pc.setLocalDescription(answer);
   socket.emit("answer", answer);
 });
 
-// on reçoit une answer
+// Quand on reçoit une answer → on la pose
 socket.on("answer", async (answer) => {
   await pc.setRemoteDescription(new RTCSessionDescription(answer));
 });
 
-// échange ICE
+// Échange des candidats ICE
 pc.onicecandidate = (e) => { if (e.candidate) socket.emit("candidate", e.candidate); };
 socket.on("candidate", async (c) => {
   try { await pc.addIceCandidate(new RTCIceCandidate(c)); }
   catch (err) { console.error("ICE add error", err); }
 });
-
-
