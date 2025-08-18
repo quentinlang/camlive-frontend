@@ -1,16 +1,42 @@
 <!DOCTYPE html>
-<html>
+<html lang="fr">
 <head>
   <meta charset="UTF-8">
-  <title>CamLive</title>
-  <link rel="stylesheet" href="style.css">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>CamLive - Chat Vidéo</title>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      text-align: center;
+    }
+    video {
+      width: 45%;
+      margin: 10px;
+      border: 2px solid #333;
+    }
+    button {
+      padding: 10px 20px;
+      font-size: 16px;
+      margin: 20px;
+      cursor: pointer;
+    }
+  </style>
 </head>
 <body>
-  <h1>CamLive - Chat Vidéo</h1>
-  <button id="start">Démarrer</button>
-  <video id="localVideo" autoplay playsinline muted></video>
+  <h1>CamLive – Chat Vidéo</h1>
+
+  <!-- Vidéos -->
+  <video id="localVideo" autoplay playsinline></video>
   <video id="remoteVideo" autoplay playsinline></video>
-  <script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
+
+  <!-- Bouton -->
+  <div>
+    <button id="start">Démarrer</button>
+  </div>
+
+  <!-- Socket.io -->
+  <script src="https://cdn.socket.io/4.5.4/socket.io.min.js"></script>
+  <!-- Ton code JS -->
   <script src="app.js"></script>
 </body>
 </html>
