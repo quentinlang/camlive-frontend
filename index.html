@@ -2,66 +2,109 @@
 <html lang="fr">
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>CamLive - Chat Vidéo</title>
   <style>
-    body {
-      font-family: Arial, sans-serif;
-      text-align: center;
-      background: #f0f0f0;
-    }
-    h1 {
-      margin-top: 20px;
-    }
-    video {
-      width: 45%;
-      margin: 10px;
-      border: 2px solid #333;
-    }
-    button {
-      padding: 10px 20px;
-      font-size: 16px;
-      margin: 20px;
-      cursor: pointer;
-    }
+    body { font-family: Arial, sans-serif; max-width: 900px; margin: 20px auto; }
+    h1 { text-align: center; }
+    .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+    video { width: 100%; aspect-ratio: 16/9; background:#eee; border:1px solid #aaa; }
+    #start { margin-top: 8px; padding:10px 16px; }
+    .hint { color:#666; font-size:14px; text-align:center; margin-top:8px; }
   </style>
 </head>
 <body>
   <h1>CamLive - Chat Vidéo</h1>
 
-  <!-- Vidéos -->
-  <video id="localVideo" autoplay playsinline muted></video>
-  <video id="remoteVideo" autoplay playsinline></video>
-
-  <!-- Bouton -->
-  <div>
-    <button id="start">Démarrer</button>
+  <div class="grid">
+    <div>
+      <div class="hint">Ta caméra</div>
+      <video id="localVideo" autoplay playsinline muted></video>
+    </div>
+    <div>
+      <div class="hint">L'autre participant</div>
+      <video id="remoteVideo" autoplay playsinline></video>
+    </div>
   </div>
+
+  <button id="start">Démarrer</button>
+  <div class="hint">Ouvre cette page sur <b>2 appareils</b> (Mac + iPhone 4G), clique “Démarrer” des deux côtés et autorise caméra & micro.</div>
 
   <!-- Socket.io -->
   <script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
 
   <script>
+    // 1) Connexion au serveur de signalisation (Render) en HTTPS
     const socket = io("https://camlive-backend.onrender.com", {
       path: "/socket.io",
       transports: ["websocket"]
     });
 
-    const pc = new RTCPeerConnection();
-    const localVideo = document.getElementById("localVideo");
-    const remoteVideo = document.getElementById("remoteVideo");
+    // 2) RTCPeerConnection avec STUN (tu pourras ajouter TURN plus tard)
+    const pc = new RTCPeerConnection({
+      iceServers: [
+        { urls: "stun:stun.l.google.com:19302" },
+        { urls: "stun:global.stun.twilio.com:3478?transport=udp" }
+      ]
+    });
 
-    pc.ontrack = (event) => {
+    const localVideo  = document.getElementById("localVideo");
+    const remoteVideo = document.getElementById("remoteVideo");
+    const startBtn    = document.getElementById("start");
+
+    let localStream;
+
+    // Ouvre la caméra avec limites (résolution/FPS) et paramètres d'envoi (bitrate)
+    async function ensureLocalStream() {
+      if (!localStream) {
+        localStream = await navigator.mediaDevices.getUserMedia({
+          video: {
+            width:  { ideal: 640 },   // ≈ 360p (plus fluide)
+            height: { ideal: 360 },
+            frameRate: { ideal: 24, max: 30 }
+          },
+          audio: {
+            echoCancellation: true,
+            noiseSuppression: true,
+            autoGainControl: true
+          }
+        });
+
+        // Ajouter les pistes au peer connection
+        localStream.getTracks().forEach(t => pc.addTrack(t, localStream));
+        localVideo.srcObject = localStream;
+
+        // Limiter le débit vidéo (pour éviter les saccades)
+        const vSender = pc.getSenders().find(s => s.track && s.track.kind === "video");
+        if (vSender) {
+          const params = vSender.getParameters();
+          params.encodings = [{
+            maxBitrate: 800_000,   // ~800 kb/s (monte à 1_200_000 si très bon réseau)
+            maxFramerate: 30
+          }];
+          await vSender.setParameters(params);
+        }
+
+        // Aide iOS : indiquer que c’est de la “motion”
+        const vTrack = localStream.getVideoTracks()[0];
+        if (vTrack && "contentHint" in vTrack) vTrack.contentHint = "motion";
+      }
+    }
+
+    // Logs utiles (F12 → Console)
+    pc.oniceconnectionstatechange = () => console.log("ICE:", pc.iceConnectionState);
+    pc.onconnectionstatechange   = () => console.log("PC:", pc.connectionState);
+
+    // Réception de la vidéo distante
+    pc.ontrack = (e) => {
       console.log("📹 Flux distant reçu");
-      remoteVideo.srcObject = event.streams[0];
+      remoteVideo.srcObject = e.streams[0];
     };
 
-    document.getElementById("start").onclick = async () => {
+    // 3) Tu démarres → tu envoies l'offre
+    startBtn.onclick = async () => {
       try {
-        const stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
-        stream.getTracks().forEach(track => pc.addTrack(track, stream));
-        localVideo.srcObject = stream;
-
+        await ensureLocalStream();
         const offer = await pc.createOffer();
         await pc.setLocalDescription(offer);
         socket.emit("offer", offer);
@@ -71,29 +114,25 @@
       }
     };
 
+    // 4) Quand tu reçois une offre → tu ouvres ta cam puis tu réponds
     socket.on("offer", async (offer) => {
+      await ensureLocalStream();
       await pc.setRemoteDescription(new RTCSessionDescription(offer));
       const answer = await pc.createAnswer();
       await pc.setLocalDescription(answer);
       socket.emit("answer", answer);
     });
 
+    // 5) Quand tu reçois une réponse
     socket.on("answer", async (answer) => {
       await pc.setRemoteDescription(new RTCSessionDescription(answer));
     });
 
-    pc.onicecandidate = (event) => {
-      if (event.candidate) {
-        socket.emit("candidate", event.candidate);
-      }
-    };
-
-    socket.on("candidate", async (candidate) => {
-      try {
-        await pc.addIceCandidate(new RTCIceCandidate(candidate));
-      } catch (err) {
-        console.error("Erreur ICE :", err);
-      }
+    // 6) Échange des candidats ICE
+    pc.onicecandidate = (e) => { if (e.candidate) socket.emit("candidate", e.candidate); };
+    socket.on("candidate", async (c) => {
+      try { await pc.addIceCandidate(new RTCIceCandidate(c)); }
+      catch (err) { console.error("ICE add error", err); }
     });
   </script>
 </body>
