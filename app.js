@@ -1,119 +1,155 @@
+// ==== CONFIG ====
 const BACKEND_URL = "https://camlive-backend.onrender.com"; // ton URL Render
 
+// ==== UI ====
 const localVideo  = document.getElementById("localVideo");
 const remoteVideo = document.getElementById("remoteVideo");
 const btnStart    = document.getElementById("start");
 const btnLeave    = document.getElementById("leave");
 const statusEl    = document.getElementById("status");
 
+// Socket.io (forcer websocket, bon pour iOS)
 const socket = io(BACKEND_URL, { path: "/socket.io", transports: ["websocket"] });
 
-let pc, localStream, currentRoom = null;
-const isIOS = /iPhone|iPad|iPod/i.test(navigator.userAgent);
-const setStatus = (t) => statusEl.textContent = t;
-const enableInCall = (b) => { btnLeave.disabled = !b; };
+// ==== STATE ====
+let pc = null;
+let localStream = null;
+let currentRoom = null;
+let joined = false;
 
+// Helpers UI
+const setStatus  = (t) => (statusEl.textContent = t ?? "");
+const enableCall = (inCall) => { btnLeave.disabled = !inCall; };
+
+// ==== MEDIA ====
 async function ensureLocalStream() {
   if (localStream) return localStream;
-  localStream = await navigator.mediaDevices.getUserMedia({
+
+  // contraintes raisonnables pour mobile/desktop
+  const isIOS = /iPhone|iPad|iPod/i.test(navigator.userAgent);
+  const constraints = {
     video: isIOS
       ? { width: { ideal: 640 }, height: { ideal: 360 }, frameRate: { ideal: 24, max: 30 }, facingMode: "user" }
       : { width: { ideal: 1280 }, height: { ideal: 720 }, frameRate: { ideal: 30, max: 30 } },
     audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true }
-  });
+  };
+
+  localStream = await navigator.mediaDevices.getUserMedia(constraints);
   localVideo.srcObject = localStream;
   return localStream;
 }
 
-async function applyVideoSendingParams() {
-  const vSender = pc.getSenders().find(s => s.track && s.track.kind === "video");
-  if (!vSender) return;
-  const vTrack = vSender.track;
-  if (vTrack && "contentHint" in vTrack) vTrack.contentHint = "motion";
-  const params = vSender.getParameters();
-  params.degradationPreference = "balanced";
-  params.encodings = [{ maxBitrate: isIOS ? 600_000 : 1_200_000, maxFramerate: isIOS ? 24 : 30 }];
-  await vSender.setParameters(params);
-}
-
+// ==== WEBRTC ====
 function createPeer() {
+  if (pc) pc.close();
+
   pc = new RTCPeerConnection({
     iceServers: [
-      { urls: "stun:stun.l.google.com:19302" },
-      { urls: "stun:global.stun.twilio.com:3478?transport=udp" }
+      { urls: "stun:stun.l.google.com:19302" } // STUN public
+      // Si besoin plus tard on ajoutera un TURN ici
     ]
   });
-  pc.oniceconnectionstatechange = () => console.log("ICE:", pc.iceConnectionState);
-  pc.onconnectionstatechange   = () => console.log("PC:", pc.connectionState);
-  pc.ontrack = (e) => { remoteVideo.srcObject = e.streams[0]; };
-  pc.onicecandidate = (e) => {
-    if (e.candidate && currentRoom) socket.emit("candidate", { room: currentRoom, candidate: e.candidate });
+
+  // quand on reçoit le flux distant
+  pc.ontrack = (e) => {
+    remoteVideo.srcObject = e.streams[0];
   };
+
+  // envoyer nos ICE candidates à l'autre
+  pc.onicecandidate = (e) => {
+    if (e.candidate && currentRoom) {
+      socket.emit("candidate", { room: currentRoom, candidate: e.candidate });
+    }
+  };
+
+  return pc;
 }
 
+// ==== SOCKET HANDLERS ====
+
+// Appareils matchés (room créée)
+socket.on("matched", async (room) => {
+  currentRoom = room;
+  setStatus("Appairé • création de l’offre…");
+
+  await ensureLocalStream();
+  createPeer();
+
+  // ajouter nos pistes locales
+  localStream.getTracks().forEach((t) => pc.addTrack(t, localStream));
+
+  // créateur de l'offre
+  const offer = await pc.createOffer({ offerToReceiveVideo: 1, offerToReceiveAudio: 1 });
+  await pc.setLocalDescription(offer);
+  socket.emit("offer", { room, sdp: offer });
+});
+
+// Réception d'une offre ➜ on répond
+socket.on("offer", async (sdp) => {
+  setStatus("Réception de l’offre • création de la réponse…");
+
+  await ensureLocalStream();
+  createPeer();
+
+  localStream.getTracks().forEach((t) => pc.addTrack(t, localStream));
+
+  await pc.setRemoteDescription(new RTCSessionDescription(sdp));
+  const answer = await pc.createAnswer();
+  await pc.setLocalDescription(answer);
+
+  socket.emit("answer", { room: currentRoom, sdp: answer });
+});
+
+// Réception de la réponse
+socket.on("answer", async (sdp) => {
+  setStatus("Réponse reçue • connexion en cours…");
+  await pc.setRemoteDescription(new RTCSessionDescription(sdp));
+});
+
+// ICE côté distant
+socket.on("candidate", async (candidate) => {
+  try {
+    await pc.addIceCandidate(new RTCIceCandidate(candidate));
+  } catch (err) {
+    console.error("Erreur ICE :", err);
+  }
+});
+
+// ==== UI ACTIONS ====
 btnStart.onclick = async () => {
-  btnStart.disabled = true;
-  setStatus("En file d'attente… clique Start aussi sur l'autre appareil");
-  socket.emit("join");
+  if (joined) return;
+  try {
+    await ensureLocalStream(); // démarre la caméra AVANT join (important iOS)
+    socket.emit("join");
+    joined = true;
+    enableCall(true);
+    setStatus("En file d’attente… clique Start aussi sur l’autre appareil.");
+  } catch (e) {
+    console.error(e);
+    setStatus("Erreur accès caméra/micro. Autorise-les dans le navigateur.");
+  }
 };
 
 btnLeave.onclick = () => {
-  cleanup();
-  setStatus("Appel terminé.");
-  btnStart.disabled = false;
-  enableInCall(false);
+  // stoppe la connexion
+  if (pc) {
+    pc.getSenders().forEach((s) => {
+      try { s.track && s.track.stop(); } catch (_) {}
+    });
+    pc.close();
+    pc = null;
+  }
+
+  // on garde l’aperçu local (optionnel). Sinon, pour couper :
+  // if (localStream) { localStream.getTracks().forEach(t => t.stop()); localStream = null; localVideo.srcObject = null; }
+  remoteVideo.srcObject = null;
+
+  joined = false;
+  currentRoom = null;
+  enableCall(false);
+  setStatus("Appel terminé. Clique Start pour recommencer.");
 };
 
-function cleanup() {
-  currentRoom = null;
-  if (pc) { try { pc.close(); } catch {} }
-  pc = null;
-  remoteVideo.srcObject = null;
-}
-
-socket.on("matched", async (room) => {
-  currentRoom = room;
-  enableInCall(true);
-  setStatus("Connecté ! Préparation de l'appel…");
-
-  createPeer();
-  const stream = await ensureLocalStream();
-  stream.getTracks().forEach(t => pc.addTrack(t, stream));
-  await applyVideoSendingParams();
-
-  try {
-    const offer = await pc.createOffer({ offerToReceiveAudio: true, offerToReceiveVideo: true });
-    await pc.setLocalDescription(offer);
-    socket.emit("offer", { room: currentRoom, sdp: offer });
-    setStatus("Appel en cours…");
-  } catch (e) {
-    console.error("createOffer error", e);
-  }
-});
-
-socket.on("offer", async (sdp) => {
-  try {
-    if (!pc) {
-      createPeer();
-      const stream = await ensureLocalStream();
-      stream.getTracks().forEach(t => pc.addTrack(t, stream));
-      await applyVideoSendingParams();
-    }
-    await pc.setRemoteDescription(new RTCSessionDescription(sdp));
-    const answer = await pc.createAnswer();
-    await pc.setLocalDescription(answer);
-    socket.emit("answer", { room: currentRoom, sdp: answer });
-  } catch (e) {
-    console.error("handle offer error", e);
-  }
-});
-
-socket.on("answer", async (sdp) => {
-  try { await pc.setRemoteDescription(new RTCSessionDescription(sdp)); }
-  catch (e) { console.error("handle answer error", e); }
-});
-
-socket.on("candidate", async ({ candidate }) => {
-  try { await pc.addIceCandidate(new RTCIceCandidate(candidate)); }
-  catch (e) { console.error("ICE add error", e); }
-});
+// Init UI
+enableCall(false);
+setStatus("Prêt • Ouvre la page sur 2 appareils puis clique Start des deux côtés.");
