@@ -1,5 +1,5 @@
 // ==== CONFIG ====
-const BACKEND_URL = "https://camlive-backend.onrender.com"; // ton URL Render
+const BACKEND_URL = "https://camlive-backend.onrender.com"; // URL Render de ton backend
 
 // ==== UI ====
 const localVideo  = document.getElementById("localVideo");
@@ -8,7 +8,7 @@ const btnStart    = document.getElementById("start");
 const btnLeave    = document.getElementById("leave");
 const statusEl    = document.getElementById("status");
 
-// Socket.io (forcer websocket, bon pour iOS)
+// Connexion Socket.io (forcer websocket pour iOS/Safari)
 const socket = io(BACKEND_URL, { path: "/socket.io", transports: ["websocket"] });
 
 // ==== STATE ====
@@ -25,7 +25,6 @@ const enableCall = (inCall) => { btnLeave.disabled = !inCall; };
 async function ensureLocalStream() {
   if (localStream) return localStream;
 
-  // contraintes raisonnables pour mobile/desktop
   const isIOS = /iPhone|iPad|iPod/i.test(navigator.userAgent);
   const constraints = {
     video: isIOS
@@ -45,17 +44,23 @@ function createPeer() {
 
   pc = new RTCPeerConnection({
     iceServers: [
-      { urls: "stun:stun.l.google.com:19302" } // STUN public
-      // Si besoin plus tard on ajoutera un TURN ici
+      // STUN public
+      { urls: "stun:stun.l.google.com:19302" },
+      // TURN public « gratuit » pour tests (peut être saturé ; pour la prod, prends un TURN dédié)
+      {
+        urls: "turn:relay1.expressturn.com:3478",
+        username: "efree",
+        credential: "efree"
+      }
     ]
   });
 
-  // quand on reçoit le flux distant
+  // flux distant
   pc.ontrack = (e) => {
     remoteVideo.srcObject = e.streams[0];
   };
 
-  // envoyer nos ICE candidates à l'autre
+  // envoyer nos ICE candidates
   pc.onicecandidate = (e) => {
     if (e.candidate && currentRoom) {
       socket.emit("candidate", { room: currentRoom, candidate: e.candidate });
@@ -65,9 +70,7 @@ function createPeer() {
   return pc;
 }
 
-// ==== SOCKET HANDLERS ====
-
-// Appareils matchés (room créée)
+// ==== SOCKET EVENTS ====
 socket.on("matched", async (room) => {
   currentRoom = room;
   setStatus("Appairé • création de l’offre…");
@@ -75,22 +78,19 @@ socket.on("matched", async (room) => {
   await ensureLocalStream();
   createPeer();
 
-  // ajouter nos pistes locales
+  // Ajouter nos pistes
   localStream.getTracks().forEach((t) => pc.addTrack(t, localStream));
 
-  // créateur de l'offre
   const offer = await pc.createOffer({ offerToReceiveVideo: 1, offerToReceiveAudio: 1 });
   await pc.setLocalDescription(offer);
   socket.emit("offer", { room, sdp: offer });
 });
 
-// Réception d'une offre ➜ on répond
 socket.on("offer", async (sdp) => {
   setStatus("Réception de l’offre • création de la réponse…");
 
   await ensureLocalStream();
   createPeer();
-
   localStream.getTracks().forEach((t) => pc.addTrack(t, localStream));
 
   await pc.setRemoteDescription(new RTCSessionDescription(sdp));
@@ -100,13 +100,11 @@ socket.on("offer", async (sdp) => {
   socket.emit("answer", { room: currentRoom, sdp: answer });
 });
 
-// Réception de la réponse
 socket.on("answer", async (sdp) => {
   setStatus("Réponse reçue • connexion en cours…");
   await pc.setRemoteDescription(new RTCSessionDescription(sdp));
 });
 
-// ICE côté distant
 socket.on("candidate", async (candidate) => {
   try {
     await pc.addIceCandidate(new RTCIceCandidate(candidate));
@@ -119,7 +117,7 @@ socket.on("candidate", async (candidate) => {
 btnStart.onclick = async () => {
   if (joined) return;
   try {
-    await ensureLocalStream(); // démarre la caméra AVANT join (important iOS)
+    await ensureLocalStream();             // Autoriser caméra/micro AVANT join (important pour iOS)
     socket.emit("join");
     joined = true;
     enableCall(true);
@@ -131,16 +129,12 @@ btnStart.onclick = async () => {
 };
 
 btnLeave.onclick = () => {
-  // stoppe la connexion
   if (pc) {
-    pc.getSenders().forEach((s) => {
-      try { s.track && s.track.stop(); } catch (_) {}
-    });
+    pc.getSenders().forEach((s) => { try { s.track && s.track.stop(); } catch (_) {} });
     pc.close();
     pc = null;
   }
-
-  // on garde l’aperçu local (optionnel). Sinon, pour couper :
+  // garder l’aperçu local (sinon, décommente pour couper)
   // if (localStream) { localStream.getTracks().forEach(t => t.stop()); localStream = null; localVideo.srcObject = null; }
   remoteVideo.srcObject = null;
 
@@ -150,6 +144,6 @@ btnLeave.onclick = () => {
   setStatus("Appel terminé. Clique Start pour recommencer.");
 };
 
-// Init UI
+// Init
 enableCall(false);
 setStatus("Prêt • Ouvre la page sur 2 appareils puis clique Start des deux côtés.");
